@@ -1,0 +1,39 @@
+services:
+  # PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: count88_postgres
+    environment:
+      POSTGRES_USER: count88
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: count88_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U count88"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Valkey (Redis互換)
+  valkey:
+    image: valkey/valkey:7.2
+    container_name: count88_valkey
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+      - ./infra/valkey/valkey.conf:/usr/local/etc/valkey/valkey.conf
+    command: valkey-server /usr/local/etc/valkey/valkey.conf
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  valkey_data:
