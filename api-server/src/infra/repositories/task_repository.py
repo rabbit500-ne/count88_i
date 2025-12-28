@@ -1,39 +1,12 @@
 """タスクリポジトリ"""
 
-from abc import ABC, abstractmethod
 from typing import Optional, List
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from src.domain.task import Task as DomainTask
 from src.infra.models.task import Task as TaskModel
-
-
-class ITaskRepository(ABC):
-    """タスクリポジトリインターフェース"""
-
-    @abstractmethod
-    def create(self, task: DomainTask) -> DomainTask:
-        """タスクを作成"""
-        pass
-
-    @abstractmethod
-    def get_by_id(self, task_id: int) -> Optional[DomainTask]:
-        """IDでタスクを取得"""
-        pass
-
-    @abstractmethod
-    def update(self, task: DomainTask) -> DomainTask:
-        """タスクを更新"""
-        pass
-
-    @abstractmethod
-    def get_pending_tasks(
-        self, limit: int = 100, phase: Optional[str] = None
-    ) -> List[DomainTask]:
-        """待機中のタスクを取得"""
-        pass
+from src.usecase.repositories.task_repository import ITaskRepository
 
 
 class TaskRepository(ITaskRepository):

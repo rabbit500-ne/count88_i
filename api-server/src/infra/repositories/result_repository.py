@@ -1,31 +1,12 @@
 """結果リポジトリ"""
 
-from abc import ABC, abstractmethod
 from typing import Optional, List
 
 from sqlalchemy.orm import Session
 
 from src.domain.result import Result as DomainResult
 from src.infra.models.result import Result as ResultModel
-
-
-class IResultRepository(ABC):
-    """結果リポジトリインターフェース"""
-
-    @abstractmethod
-    def create(self, result: DomainResult) -> DomainResult:
-        """結果を作成"""
-        pass
-
-    @abstractmethod
-    def get_by_id(self, result_id: int) -> Optional[DomainResult]:
-        """IDで結果を取得"""
-        pass
-
-    @abstractmethod
-    def get_by_task_id(self, task_id: int) -> List[DomainResult]:
-        """タスクIDで結果を取得"""
-        pass
+from src.usecase.repositories.result_repository import IResultRepository
 
 
 class ResultRepository(IResultRepository):
@@ -42,8 +23,6 @@ class ResultRepository(IResultRepository):
 
     def create(self, result: DomainResult) -> DomainResult:
         """結果を作成"""
-        import json
-
         result_model = ResultModel(
             task_id=result.task_id,
             result_type=result.result_type,
