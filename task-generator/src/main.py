@@ -5,7 +5,7 @@ import logging
 from src.config import settings
 from src.database.client import DatabaseClient
 from src.generator.initial import generate_initial_tasks
-from src.queue.client import ValkeyClient
+from src.valkey.client import ValkeyClient
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level),

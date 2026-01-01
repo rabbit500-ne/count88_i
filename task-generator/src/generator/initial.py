@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from src.database.client import DatabaseClient, TaskRow
-from src.queue.client import ValkeyClient
+from src.valkey.client import ValkeyClient
 
 
 # エンドユーザ仕様書の初期配置例

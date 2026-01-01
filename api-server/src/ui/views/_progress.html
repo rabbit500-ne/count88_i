@@ -1,0 +1,9 @@
+<div style="margin-top: 10px;">
+  <div>総タスク: <code>{{ total }}</code></div>
+  <div>pending: <code>{{ pending }}</code> / processing: <code>{{ processing }}</code></div>
+  <div>completed: <code>{{ completed }}</code> / failed+timeout: <code>{{ failed }}</code></div>
+  <div style="margin-top: 8px;">
+    進捗: <code>{{ "%.2f"|format(progress_pct) }}%</code>
+  </div>
+</div>
+
