@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError, TimeoutError
 from sqlalchemy.orm import Session
 
@@ -35,10 +36,9 @@ def _turn_to_api(turn: str) -> str:
     },
 )
 def get_task(
-    response: Response,
     db: Session = Depends(get_db),
     x_client_id: str | None = Header(default=None, alias="X-Client-ID"),
-) -> TaskResponse | None:
+) -> TaskResponse | Response | JSONResponse:
     """タスクを取得"""
     task_repo = TaskRepository(db)
     valkey = ValkeyClient()
@@ -52,12 +52,13 @@ def get_task(
             message="Valkeyに接続できません",
             timestamp=datetime.now(timezone.utc),
         )
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return err  # type: ignore[return-value]
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=err.model_dump(),
+        )
 
     if task is None:
-        response.status_code = status.HTTP_204_NO_CONTENT
-        return None
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return TaskResponse(
         task_id=str(task.task_id),

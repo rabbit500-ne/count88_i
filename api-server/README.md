@@ -19,8 +19,11 @@ cp .env.example .env
 ## 開発
 
 ```bash
+# 移動
+cd api-server
+
 # APIサーバ起動
-uv run uvicorn src.main:app --reload
+uv run uvicorn src.main:app --reload --port 8001
 
 # テスト実行
 uv run pytest
