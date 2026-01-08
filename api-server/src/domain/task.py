@@ -17,6 +17,7 @@ class Task:
     parent_task_id: Optional[int]
     position: Position
     depth: int
+    path_count: str  # 到達パス数（多倍長整数文字列）
     status: Literal["pending", "processing", "completed", "failed", "timeout"]
     priority: int
     retry_count: int

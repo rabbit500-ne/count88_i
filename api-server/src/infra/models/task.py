@@ -35,6 +35,7 @@ class Task(Base):
     position_white: Mapped[bytes] = mapped_column("position_white", nullable=False)  # BYTEA
     turn: Mapped[str] = mapped_column(String(1), nullable=False)
     depth: Mapped[int] = mapped_column(Integer, nullable=False)
+    path_count: Mapped[str] = mapped_column(String(80), nullable=False, default="1")  # 到達パス数（多倍長整数文字列）
 
     # ステータス管理
     status: Mapped[str] = mapped_column(

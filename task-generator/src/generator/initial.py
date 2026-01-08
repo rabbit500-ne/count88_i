@@ -17,7 +17,7 @@ def generate_initial_tasks(
     valkey: ValkeyClient,
     depth: int = 6,
     queue_name: str = "task_queue:bfs:phase1",
-    phase: str = "phase1_initial",
+    phase: str = "bfs_d00_06",
 ) -> int:
     """初期局面1件のBFSタスクをDBへ作成し、Valkeyへ投入する"""
     task = TaskRow(
