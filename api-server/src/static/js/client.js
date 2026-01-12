@@ -176,7 +176,57 @@
     }
   };
 
-  // BFSアルゴリズム
+  // DFSアルゴリズム（深さ優先探索で終局までカウント）
+  const computeDFS = (task) => {
+    const startPosition = task.position;
+    
+    // 再帰的なDFS関数
+    const dfs = (black, white, turn, passCount) => {
+      const legalMoves = getLegalMoves(black, white, turn);
+      
+      if (legalMoves === 0n) {
+        // 合法手がない場合（パス）
+        if (passCount === 1) {
+          // 2連続パス → ゲーム終了、1棋譜としてカウント
+          return 1n;
+        } else {
+          // パス（手番交代して続行）
+          const nextTurn = turn === "black" ? "white" : "black";
+          return dfs(black, white, nextTurn, 1);
+        }
+      }
+      
+      // 各合法手を再帰的に探索
+      let total = 0n;
+      for (let pos = 0n; pos < 64n; pos++) {
+        const moveBit = 1n << pos;
+        if ((legalMoves & moveBit) === 0n) continue;
+        
+        const nextPosition = makeMove(black, white, turn, moveBit);
+        total += dfs(
+          nextPosition.black,
+          nextPosition.white,
+          nextPosition.turn,
+          0
+        );
+      }
+      
+      return total;
+    };
+    
+    // DFS実行
+    const gameCount = dfs(
+      startPosition.black,
+      startPosition.white,
+      startPosition.turn,
+      0
+    );
+    
+    // 結果を返す（BigIntを文字列に変換）
+    return [{ label: "game_count", value: gameCount.toString() }];
+  };
+
+  // BFSアルゴリズム（幅優先探索で指定深さまで展開）
   const computeBFS = (task) => {
     const startPosition = task.position;
     const targetDepth = task.depth || 6;
@@ -256,9 +306,9 @@
   };
 
   const computeStub = async (task) => {
-    // ここは最小実装（統合確認が目的）。後で本物のBFS/DFSに差し替える。
     if (task.task_type === "DFS") {
-      return [{ label: "game_count", value: "1" }];
+      // DFSタスクの場合は実際の計算を実行
+      return computeDFS(task);
     }
     // BFSタスクの場合は実際の計算を実行
     return computeBFS(task);
