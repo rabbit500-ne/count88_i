@@ -11,27 +11,27 @@ from src.valkey.client import ValkeyClient
 logger = logging.getLogger(__name__)
 
 # 設定（暫定値、ベンチマーク後に調整）
-BFS_DEPTH = 6  # 各BFSステップの探索深さ
-DFS_START_DEPTH = 12  # この累積深さに達したらDFSに切り替え
+SEGMENT_WIDTH = 6  # セグメント幅（手番数、パスも1手として数える）
+DFS_START_DEPTH = 54  # DFSを開始する局面深さ（D48-54 の終端=54 から）
 
 
-def determine_next_task_type(current_accumulated_depth: int) -> tuple[str, str, str]:
+def determine_child_task_spec(child_start_depth: int) -> tuple[str, str, str, int]:
     """
-    次のタスクタイプとフェーズを決定
+    子タスク（= 現BFS結果の child_positions から生成するタスク）の仕様を決定
 
     Args:
-        current_accumulated_depth: 現在の累積深さ（親タスクの開始深さ + BFS_DEPTH）
+        child_start_depth: 子タスクが開始する深さ（= 親BFSセグメントの終端深さ）
 
     Returns:
-        (task_type, phase, queue_name)
+        (task_type, phase, queue_name, depth)
     """
-    next_depth = current_accumulated_depth + BFS_DEPTH
+    if child_start_depth >= DFS_START_DEPTH:
+        # DFSは終局まで
+        return ("DFS", f"dfs_from_d{child_start_depth:02d}", "task_queue:dfs:phase3", 100)
 
-    if next_depth >= DFS_START_DEPTH:
-        return ("DFS", "dfs_final", "task_queue:dfs:phase3")
-    else:
-        phase = f"bfs_d{current_accumulated_depth:02d}_{next_depth:02d}"
-        return ("BFS", phase, "task_queue:bfs:phase2")
+    end_depth = child_start_depth + SEGMENT_WIDTH
+    phase = f"bfs_d{child_start_depth:02d}_{end_depth:02d}"
+    return ("BFS", phase, "task_queue:bfs:phase2", SEGMENT_WIDTH)
 
 
 def _parse_position(position: dict) -> tuple[bytes, bytes, str]:
@@ -66,15 +66,12 @@ def _get_accumulated_depth_from_phase(phase: str) -> int:
     フェーズ名から累積深さを取得
 
     Args:
-        phase: "bfs_d00_06", "bfs_d06_12", "phase1_initial" など
+        phase: "bfs_d00_06", "bfs_d06_12" など
 
     Returns:
         累積深さ（フェーズの終了深さ）
     """
-    if phase == "phase1_initial":
-        # 初期フェーズは D0 から D6 まで
-        return 6
-    elif phase.startswith("bfs_d"):
+    if phase.startswith("bfs_d"):
         # "bfs_d06_12" のような形式から終了深さを取得
         parts = phase.replace("bfs_d", "").split("_")
         if len(parts) == 2:
@@ -111,24 +108,18 @@ def generate_intermediate_tasks(
     for task_id, phase, depth, child_positions in results:
         logger.info(f"Processing completed BFS task: task_id={task_id}, phase={phase}, depth={depth}")
 
-        # 累積深さを計算
-        accumulated_depth = _get_accumulated_depth_from_phase(phase)
-
-        # 次のタスクタイプとフェーズを決定
-        next_task_type, next_phase, queue_name = determine_next_task_type(accumulated_depth)
-
-        # 次のタスクの探索深さを決定
-        if next_task_type == "BFS":
-            next_depth = BFS_DEPTH
-        else:
-            # DFSは終局まで（十分大きな値を設定）
-            next_depth = 100
+        # 子タスクの開始深さ（= このBFSセグメントの終端）
+        child_start_depth = _get_accumulated_depth_from_phase(phase)
+        # 子タスク仕様（タスクタイプ/フェーズ/キュー/探索深さ）
+        next_task_type, next_phase, queue_name, next_depth = determine_child_task_spec(
+            child_start_depth
+        )
 
         # child_positionsから各子タスクを生成
         generated_count = 0
         for child in child_positions:
             position = child["position"]
-            path_count = str(child.get("path_count", 1))
+            path_count = str(child.get("path_count", "1"))
 
             position_black, position_white, turn = _parse_position(position)
 
@@ -154,6 +145,9 @@ def generate_intermediate_tasks(
             f"Generated {generated_count} {next_task_type} tasks from task_id={task_id} "
             f"(phase={next_phase}, queue={queue_name})"
         )
+
+        # このBFS結果（child_positions）は、子タスク生成が済んだので破棄（保持し続けない）
+        db.consume_bfs_child_positions(task_id)
 
         # 処理済みとしてマーク
         processed_task_ids.add(task_id)

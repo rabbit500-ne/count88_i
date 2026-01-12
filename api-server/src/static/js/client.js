@@ -236,7 +236,7 @@
 
     // 深さごとのキュー
     let queue = [{ position: startPosition, passCount: 0 }];
-    const resultPositions = new Map(); // 局面 -> 到達パス数
+    const resultPositions = new Map(); // 局面 -> 到達パス数（BigInt）
 
     for (let depth = 0; depth < targetDepth; depth++) {
       const nextQueue = [];
@@ -250,9 +250,9 @@
             // 2連続パス → ゲーム終了（この深さで終了）
             const key = positionKey(position);
             if (!resultPositions.has(key)) {
-              resultPositions.set(key, 0);
+              resultPositions.set(key, 0n);
             }
-            resultPositions.set(key, resultPositions.get(key) + 1);
+            resultPositions.set(key, resultPositions.get(key) + 1n);
             continue;
           } else {
             // パス（手番交代、深さは進める）
@@ -283,9 +283,9 @@
     for (const { position } of queue) {
       const key = positionKey(position);
       if (!resultPositions.has(key)) {
-        resultPositions.set(key, 0);
+        resultPositions.set(key, 0n);
       }
-      resultPositions.set(key, resultPositions.get(key) + 1);
+      resultPositions.set(key, resultPositions.get(key) + 1n);
     }
 
     // 結果をフォーマット
@@ -298,7 +298,8 @@
           white,
           turn,
         },
-        path_count: pathCount,
+        // JSON互換のため文字列化（多倍長整数）
+        path_count: pathCount.toString(),
       });
     }
 

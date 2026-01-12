@@ -5,6 +5,7 @@ import time
 
 from src.config import settings
 from src.database.client import DatabaseClient
+from src.generator.aggregate import aggregate_parent_game_counts
 from src.generator.initial import generate_initial_tasks
 from src.generator.intermediate import generate_intermediate_tasks
 from src.valkey.client import ValkeyClient
@@ -44,6 +45,10 @@ def main():
             )
             if generated_count > 0:
                 logger.info(f"合計 {generated_count} 件のタスクを生成しました")
+
+            aggregated_count = aggregate_parent_game_counts(db=db)
+            if aggregated_count > 0:
+                logger.info(f"合計 {aggregated_count} 件の親タスク棋譜数を集約しました")
 
             time.sleep(POLL_INTERVAL_SECONDS)
 
