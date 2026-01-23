@@ -38,6 +38,159 @@ class DatabaseClient:
     def __init__(self) -> None:
         self._dsn = settings.database_url
 
+    def count_unaggregated_bfs_tasks_by_phase(self, phase: str) -> int:
+        """
+        指定phaseのBFSタスクのうち、task-generator による集約(game_count)が未作成の件数を返す。
+
+        用途:
+          - D42-48層の current/next (=2セグメント) 制御
+        """
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM tasks t
+                    WHERE t.task_type = 'BFS'
+                      AND t.phase = %s
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM results r
+                        WHERE r.task_id = t.task_id
+                          AND r.result_type = 'BFS'
+                          AND r.client_id = 'task-generator'
+                          AND r.game_count IS NOT NULL
+                      )
+                    """,
+                    (phase,),
+                )
+                return int(cur.fetchone()[0])
+
+    def get_completed_bfs_task_headers_with_children(
+        self,
+        processed_task_ids: Optional[set[int]] = None,
+        *,
+        limit: int = 200,
+    ) -> list[tuple[int, str, int]]:
+        """
+        child_positions を持つ完了BFSタスクのヘッダ情報を取得（child_positions本体は取得しない）
+
+        Returns:
+            (task_id, phase, depth) のリスト（task_id昇順）
+        """
+        if processed_task_ids is None:
+            processed_task_ids = set()
+
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (t.task_id) t.task_id, t.phase, t.depth
+                    FROM tasks t
+                    JOIN results r ON t.task_id = r.task_id
+                    WHERE t.status = 'completed'
+                      AND t.task_type = 'BFS'
+                      AND r.result_type = 'BFS'
+                      AND r.child_positions IS NOT NULL
+                    ORDER BY t.task_id, r.result_id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+
+        headers: list[tuple[int, str, int]] = []
+        for task_id, phase, depth in rows:
+            if int(task_id) not in processed_task_ids:
+                headers.append((int(task_id), str(phase), int(depth)))
+        return headers
+
+    def get_latest_bfs_child_positions(self, task_id: int) -> Optional[list]:
+        """指定task_idの最新のBFS child_positions（NULLならNone）"""
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT child_positions
+                    FROM results
+                    WHERE task_id = %s
+                      AND result_type = 'BFS'
+                      AND child_positions IS NOT NULL
+                    ORDER BY result_id DESC
+                    LIMIT 1
+                    """,
+                    (task_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+    def take_latest_bfs_child_positions(
+        self, task_id: int, take: int
+    ) -> tuple[list, bool]:
+        """
+        最新のBFS child_positions から先頭take件を取り出し、残りをDBへ書き戻す（段階的消費）。
+
+        Returns:
+            (taken_children, consumed_all)
+        """
+        if take <= 0:
+            return ([], False)
+
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                # 最新のchild_positionsをロックして取り出す
+                cur.execute(
+                    """
+                    SELECT result_id, child_positions
+                    FROM results
+                    WHERE task_id = %s
+                      AND result_type = 'BFS'
+                      AND child_positions IS NOT NULL
+                    ORDER BY result_id DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return ([], True)
+
+                result_id, child_positions = row
+                children = list(child_positions or [])
+
+                taken = children[:take]
+                remaining = children[take:]
+                consumed_all = len(remaining) == 0
+
+                cur.execute(
+                    """
+                    UPDATE results
+                    SET child_positions = %s
+                    WHERE result_id = %s
+                    """,
+                    (
+                        None if consumed_all else psycopg2.extras.Json(remaining),
+                        int(result_id),
+                    ),
+                )
+                # 同一task_idに複数のBFS結果が残っている場合は、最新(result_id)以外を無効化して重複処理を防ぐ
+                cur.execute(
+                    """
+                    UPDATE results
+                    SET child_positions = NULL
+                    WHERE task_id = %s
+                      AND result_type = 'BFS'
+                      AND result_id <> %s
+                      AND child_positions IS NOT NULL
+                    """,
+                    (task_id, int(result_id)),
+                )
+
+        return (taken, consumed_all)
+
     def create_task(self, task: TaskRow) -> int:
         """tasks にINSERTして task_id を返す"""
         with psycopg2.connect(self._dsn) as conn:

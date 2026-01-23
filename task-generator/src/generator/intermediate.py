@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 SEGMENT_WIDTH = 6  # セグメント幅（手番数、パスも1手として数える）
 DFS_START_DEPTH = 54  # DFSを開始する局面深さ（D48-54 の終端=54 から）
 
+# 仕様（Doc/内部仕様書.md: 591-599）に基づく制御
+LIMITED_BFS_PHASE = "bfs_d42_48"
+LIMITED_BFS_MAX_INFLIGHT = 2  # current/next の2セグメントのみ
+
 
 def determine_child_task_spec(child_start_depth: int) -> tuple[str, str, str, int]:
     """
@@ -98,14 +102,16 @@ def generate_intermediate_tasks(
     Returns:
         生成したタスク数
     """
-    results = db.get_completed_bfs_results_with_children(processed_task_ids)
+    # child_positions は巨大になり得るため、まずヘッダだけ取得して必要なときだけ本体を取る
+    headers = db.get_completed_bfs_task_headers_with_children(processed_task_ids)
 
-    if not results:
+    if not headers:
         return 0
 
     total_generated = 0
+    remaining_capacity_for_limited_phase: Optional[int] = None
 
-    for task_id, phase, depth, child_positions in results:
+    for task_id, phase, depth in headers:
         logger.info(f"Processing completed BFS task: task_id={task_id}, phase={phase}, depth={depth}")
 
         # 子タスクの開始深さ（= このBFSセグメントの終端）
@@ -114,6 +120,34 @@ def generate_intermediate_tasks(
         next_task_type, next_phase, queue_name, next_depth = determine_child_task_spec(
             child_start_depth
         )
+
+        # D42-48のみ「current/next 2セグメント」制御を適用
+        if next_task_type == "BFS" and next_phase == LIMITED_BFS_PHASE:
+            if remaining_capacity_for_limited_phase is None:
+                in_flight = db.count_unaggregated_bfs_tasks_by_phase(LIMITED_BFS_PHASE)
+                remaining_capacity_for_limited_phase = max(0, LIMITED_BFS_MAX_INFLIGHT - in_flight)
+                logger.info(
+                    f"Limited phase inflight={in_flight}, remaining_capacity={remaining_capacity_for_limited_phase}"
+                )
+
+            if remaining_capacity_for_limited_phase <= 0:
+                # capacityが空くまで待つ（child_positionsは残しておく）
+                continue
+
+            # 必要数だけ取り出して段階的に消費
+            child_positions, consumed_all = db.take_latest_bfs_child_positions(
+                task_id, remaining_capacity_for_limited_phase
+            )
+        else:
+            # 既存仕様: 全件を次タスク化
+            child_positions = db.get_latest_bfs_child_positions(task_id) or []
+            consumed_all = True
+
+        if not child_positions:
+            # 取れなかった（別プロセス等で消費済み）/空だった
+            if consumed_all:
+                processed_task_ids.add(task_id)
+            continue
 
         # child_positionsから各子タスクを生成
         generated_count = 0
@@ -146,11 +180,20 @@ def generate_intermediate_tasks(
             f"(phase={next_phase}, queue={queue_name})"
         )
 
-        # このBFS結果（child_positions）は、子タスク生成が済んだので破棄（保持し続けない）
-        db.consume_bfs_child_positions(task_id)
+        if next_task_type == "BFS" and next_phase == LIMITED_BFS_PHASE:
+            # capacityを消費
+            remaining_capacity_for_limited_phase = max(
+                0, (remaining_capacity_for_limited_phase or 0) - generated_count
+            )
+            # child_positionsが全消費された場合のみ processed 扱いにする
+            if consumed_all:
+                processed_task_ids.add(task_id)
+        else:
+            # このBFS結果（child_positions）は、子タスク生成が済んだので破棄（保持し続けない）
+            db.consume_bfs_child_positions(task_id)
 
-        # 処理済みとしてマーク
-        processed_task_ids.add(task_id)
+            # 処理済みとしてマーク
+            processed_task_ids.add(task_id)
         total_generated += generated_count
 
     return total_generated

@@ -1,9 +1,29 @@
 <div style="margin-top: 10px;">
-  <div>総タスク: <code>{{ total }}</code></div>
-  <div>pending: <code>{{ pending }}</code> / processing: <code>{{ processing }}</code></div>
-  <div>completed: <code>{{ completed }}</code> / failed+timeout: <code>{{ failed }}</code></div>
-  <div style="margin-top: 8px;">
-    進捗: <code>{{ "%.2f"|format(progress_pct) }}%</code>
-  </div>
+  <table style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">type</th>
+        <th style="text-align:right; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">total</th>
+        <th style="text-align:right; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">pending</th>
+        <th style="text-align:right; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">processing</th>
+        <th style="text-align:right; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">completed</th>
+        <th style="text-align:right; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">failed+timeout</th>
+        <th style="text-align:right; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">progress</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          <td style="padding: 6px;"><code>{{ r["label"] }}</code></td>
+          <td style="padding: 6px; text-align:right;"><code>{{ r["total"] }}</code></td>
+          <td style="padding: 6px; text-align:right;"><code>{{ r["pending"] }}</code></td>
+          <td style="padding: 6px; text-align:right;"><code>{{ r["processing"] }}</code></td>
+          <td style="padding: 6px; text-align:right;"><code>{{ r["completed"] }}</code></td>
+          <td style="padding: 6px; text-align:right;"><code>{{ r["failed"] }}</code></td>
+          <td style="padding: 6px; text-align:right;"><code>{{ "%.2f"|format(r["progress_pct"]) }}%</code></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
