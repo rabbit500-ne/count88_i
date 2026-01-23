@@ -67,35 +67,51 @@ def progress_fragment(
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """進捗フラグメント"""
-    total = int(db.query(func.count(Task.task_id)).scalar() or 0)
-    pending = int(db.query(func.count(Task.task_id)).filter(Task.status == "pending").scalar() or 0)
-    processing = int(
-        db.query(func.count(Task.task_id)).filter(Task.status == "processing").scalar() or 0
-    )
-    completed = int(
-        db.query(func.count(Task.task_id)).filter(Task.status == "completed").scalar() or 0
-    )
-    failed = int(
-        db.query(func.count(Task.task_id))
-        .filter(Task.status.in_(("failed", "timeout")))
-        .scalar()
-        or 0
-    )
+    def _count_tasks(*, task_type: Optional[str], statuses: Optional[tuple[str, ...]] = None) -> int:
+        q = db.query(func.count(Task.task_id))
+        if task_type is not None:
+            q = q.filter(Task.task_type == task_type)
+        if statuses is not None:
+            if len(statuses) == 1:
+                q = q.filter(Task.status == statuses[0])
+            else:
+                q = q.filter(Task.status.in_(statuses))
+        return int(q.scalar() or 0)
 
-    pct = 0.0
-    if total > 0:
-        pct = (completed / total) * 100.0
-
-    return templates.TemplateResponse(
-        "_progress.html",
-        {
-            "request": request,
+    def _make_row(*, label: str, task_type: Optional[str]) -> dict[str, object]:
+        total = _count_tasks(task_type=task_type)
+        pending = _count_tasks(task_type=task_type, statuses=("pending",))
+        processing = _count_tasks(task_type=task_type, statuses=("processing",))
+        completed = _count_tasks(task_type=task_type, statuses=("completed",))
+        failed = _count_tasks(task_type=task_type, statuses=("failed", "timeout"))
+        pct = (completed / total) * 100.0 if total > 0 else 0.0
+        return {
+            "label": label,
             "total": total,
             "pending": pending,
             "processing": processing,
             "completed": completed,
             "failed": failed,
             "progress_pct": pct,
+        }
+
+    overall = _make_row(label="ALL", task_type=None)
+    bfs = _make_row(label="BFS", task_type="BFS")
+    dfs = _make_row(label="DFS", task_type="DFS")
+
+    return templates.TemplateResponse(
+        "_progress.html",
+        {
+            "request": request,
+            # backward compatible (既存UIのキーを維持)
+            "total": overall["total"],
+            "pending": overall["pending"],
+            "processing": overall["processing"],
+            "completed": overall["completed"],
+            "failed": overall["failed"],
+            "progress_pct": overall["progress_pct"],
+            # new (BFS/DFS別)
+            "rows": [overall, bfs, dfs],
         },
     )
 
