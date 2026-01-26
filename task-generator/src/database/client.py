@@ -30,6 +30,7 @@ class TaskRow:
     created_at: datetime = datetime.utcnow()
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    segment_role: Optional[str] = None  # "current" | "next" | None
 
 
 class DatabaseClient:
@@ -71,9 +72,15 @@ class DatabaseClient:
         processed_task_ids: Optional[set[int]] = None,
         *,
         limit: int = 200,
+        phase_filter: Optional[str] = None,
     ) -> list[tuple[int, str, int]]:
         """
         child_positions を持つ完了BFSタスクのヘッダ情報を取得（child_positions本体は取得しない）
+
+        Args:
+            processed_task_ids: 処理済みタスクIDセット
+            limit: 取得上限
+            phase_filter: フェーズでフィルタリング（例: "bfs_d36_42"）
 
         Returns:
             (task_id, phase, depth) のリスト（task_id昇順）
@@ -83,8 +90,7 @@ class DatabaseClient:
 
         with psycopg2.connect(self._dsn) as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
+                query = """
                     SELECT DISTINCT ON (t.task_id) t.task_id, t.phase, t.depth
                     FROM tasks t
                     JOIN results r ON t.task_id = r.task_id
@@ -92,11 +98,15 @@ class DatabaseClient:
                       AND t.task_type = 'BFS'
                       AND r.result_type = 'BFS'
                       AND r.child_positions IS NOT NULL
-                    ORDER BY t.task_id, r.result_id DESC
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
+                """
+                params = []
+                if phase_filter:
+                    query += " AND t.phase = %s"
+                    params.append(phase_filter)
+                query += " ORDER BY t.task_id, r.result_id DESC LIMIT %s"
+                params.append(limit)
+
+                cur.execute(query, tuple(params))
                 rows = cur.fetchall()
 
         headers: list[tuple[int, str, int]] = []
@@ -104,6 +114,168 @@ class DatabaseClient:
             if int(task_id) not in processed_task_ids:
                 headers.append((int(task_id), str(phase), int(depth)))
         return headers
+
+    def get_d42_48_candidates(self, processed_task_ids: Optional[set[int]] = None) -> list[int]:
+        """
+        D42-48層を生成する候補（D36-42層の完了したBFSタスク）をtask_id昇順で取得
+
+        仕様（Doc/内部仕様書.md:596-599）に基づく:
+        - D42-48層の候補からtask_id昇順で選ぶ
+        - current: 最小task_id
+        - next: 次点のtask_id
+
+        Args:
+            processed_task_ids: 処理済みタスクIDセット
+
+        Returns:
+            task_idのリスト（task_id昇順）
+        """
+        if processed_task_ids is None:
+            processed_task_ids = set()
+
+        headers = self.get_completed_bfs_task_headers_with_children(
+            processed_task_ids=processed_task_ids,
+            phase_filter="bfs_d36_42",
+            limit=200,
+        )
+        return [task_id for task_id, _, _ in headers]
+
+    def get_current_next_tasks_by_phase(self, phase: str) -> tuple[Optional[int], Optional[int]]:
+        """
+        指定phaseのcurrent/nextタスクを取得
+
+        Args:
+            phase: フェーズ名（例: "bfs_d00_06"）
+
+        Returns:
+            (current_task_id, next_task_id) のタプル
+        """
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                # currentタスクを取得
+                cur.execute(
+                    """
+                    SELECT task_id
+                    FROM tasks
+                    WHERE phase = %s
+                      AND task_type = 'BFS'
+                      AND segment_role = 'current'
+                    ORDER BY task_id
+                    LIMIT 1
+                    """,
+                    (phase,),
+                )
+                current_row = cur.fetchone()
+                current_task_id = int(current_row[0]) if current_row else None
+                
+                # nextタスクを取得
+                cur.execute(
+                    """
+                    SELECT task_id
+                    FROM tasks
+                    WHERE phase = %s
+                      AND task_type = 'BFS'
+                      AND segment_role = 'next'
+                    ORDER BY task_id
+                    LIMIT 1
+                    """,
+                    (phase,),
+                )
+                next_row = cur.fetchone()
+                next_task_id = int(next_row[0]) if next_row else None
+        
+        return (current_task_id, next_task_id)
+
+    def set_current_next_tasks_by_phase(
+        self, phase: str, current_task_id: Optional[int], next_task_id: Optional[int]
+    ) -> None:
+        """
+        指定phaseのcurrent/nextタスクを設定
+
+        Args:
+            phase: フェーズ名（例: "bfs_d00_06"）
+            current_task_id: currentタスクのID（Noneの場合はクリア）
+            next_task_id: nextタスクのID（Noneの場合はクリア）
+        """
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                # 既存のcurrent/nextをクリア
+                cur.execute(
+                    """
+                    UPDATE tasks
+                    SET segment_role = NULL
+                    WHERE phase = %s
+                      AND segment_role IN ('current', 'next')
+                    """,
+                    (phase,),
+                )
+                
+                # 新しいcurrent/nextを設定
+                if current_task_id is not None:
+                    cur.execute(
+                        """
+                        UPDATE tasks
+                        SET segment_role = 'current'
+                        WHERE task_id = %s AND phase = %s
+                        """,
+                        (current_task_id, phase),
+                    )
+                
+                if next_task_id is not None:
+                    cur.execute(
+                        """
+                        UPDATE tasks
+                        SET segment_role = 'next'
+                        WHERE task_id = %s AND phase = %s
+                        """,
+                        (next_task_id, phase),
+                    )
+                
+                conn.commit()
+
+    def get_candidates_for_phase(self, phase: str, processed_task_ids: Optional[set[int]] = None) -> list[int]:
+        """
+        指定phaseの候補（完了したBFSタスク）をtask_id昇順で取得
+
+        Args:
+            phase: フェーズ名（例: "bfs_d00_06"）
+            processed_task_ids: 処理済みタスクIDセット
+
+        Returns:
+            task_idのリスト（task_id昇順）
+        """
+        if processed_task_ids is None:
+            processed_task_ids = set()
+
+        headers = self.get_completed_bfs_task_headers_with_children(
+            processed_task_ids=processed_task_ids,
+            phase_filter=phase,
+            limit=200,
+        )
+        return [task_id for task_id, _, _ in headers]
+
+    def is_task_current(self, task_id: int) -> bool:
+        """
+        タスクがcurrentかどうかを判定
+
+        Args:
+            task_id: タスクID
+
+        Returns:
+            currentの場合True
+        """
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT segment_role
+                    FROM tasks
+                    WHERE task_id = %s
+                    """,
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                return row is not None and row[0] == 'current'
 
     def get_latest_bfs_child_positions(self, task_id: int) -> Optional[list]:
         """指定task_idの最新のBFS child_positions（NULLならNone）"""
@@ -202,14 +374,14 @@ class DatabaseClient:
                         position_black, position_white, turn, depth, path_count,
                         status, priority, retry_count,
                         assigned_to, assigned_at,
-                        created_at, started_at, completed_at
+                        created_at, started_at, completed_at, segment_role
                     )
                     VALUES (
                         %s, %s, %s,
                         %s, %s, %s, %s, %s,
                         %s, %s, %s,
                         %s, %s,
-                        %s, %s, %s
+                        %s, %s, %s, %s
                     )
                     RETURNING task_id
                     """,
@@ -230,6 +402,7 @@ class DatabaseClient:
                         task.created_at,
                         task.started_at,
                         task.completed_at,
+                        task.segment_role,
                     ),
                 )
                 task_id = cur.fetchone()[0]

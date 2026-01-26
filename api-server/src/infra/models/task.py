@@ -43,6 +43,9 @@ class Task(Base):
     )
     priority: Mapped[int] = mapped_column(Integer, default=100)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # セグメント役割（current/next制御用）
+    segment_role: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # 'current', 'next', NULL
 
     # クライアント情報
     assigned_to: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -67,7 +70,12 @@ class Task(Base):
             "status IN ('pending', 'processing', 'completed', 'failed', 'timeout')",
             name="check_status",
         ),
+        CheckConstraint(
+            "segment_role IS NULL OR segment_role IN ('current', 'next')",
+            name="check_segment_role",
+        ),
         Index("idx_status", "status"),
         Index("idx_phase", "phase"),
         Index("idx_assigned", "assigned_to", "assigned_at"),
+        Index("idx_phase_segment_role", "phase", "segment_role"),
     )

@@ -6,12 +6,16 @@ PostgreSQLの全テーブルをTRUNCATE、Valkeyの全データを削除しま�
 使用方法:
     uv run python scripts/db_reset.py           # 確認プロンプトあり
     uv run python scripts/db_reset.py --force   # 確認なしで実行
+    uv run python scripts/db_reset.py --migrate # リセット後にマイグレーション実行
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
+from pathlib import Path
 from typing import Optional
 
 import psycopg2
@@ -116,6 +120,47 @@ def confirm_reset() -> bool:
     return response == "yes"
 
 
+def run_migrations(verbose: bool = True) -> bool:
+    """Alembicマイグレーションを実行"""
+    try:
+        # api-serverディレクトリに移動
+        script_dir = Path(__file__).parent
+        api_server_dir = script_dir.parent / "api-server"
+        
+        if not api_server_dir.exists():
+            if verbose:
+                print(f"❌ api-serverディレクトリが見つかりません: {api_server_dir}", file=sys.stderr)
+            return False
+        
+        if verbose:
+            print(f"\nマイグレーション実行中... ({api_server_dir})")
+        
+        # alembic upgrade head を実行
+        result = subprocess.run(
+            ["uv", "run", "alembic", "upgrade", "head"],
+            cwd=str(api_server_dir),
+            capture_output=not verbose,
+            text=True,
+        )
+        
+        if result.returncode != 0:
+            if verbose:
+                print(f"❌ マイグレーションエラー: {result.stderr}", file=sys.stderr)
+            else:
+                print(f"❌ マイグレーションエラー", file=sys.stderr)
+                print(result.stderr, file=sys.stderr)
+            return False
+        
+        if verbose:
+            print("✅ マイグレーション完了")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ マイグレーション実行エラー: {e}", file=sys.stderr)
+        return False
+
+
 def main(args: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="データベースをリセットします（PostgreSQL + Valkey）"
@@ -139,6 +184,11 @@ def main(args: Optional[list[str]] = None) -> int:
         "--quiet", "-q",
         action="store_true",
         help="出力を抑制",
+    )
+    parser.add_argument(
+        "--migrate", "-m",
+        action="store_true",
+        help="リセット後にマイグレーションを実行",
     )
 
     parsed = parser.parse_args(args)
@@ -168,10 +218,16 @@ def main(args: Optional[list[str]] = None) -> int:
         if not reset_valkey(host, port, db, verbose):
             success = False
 
+    # マイグレーション実行
+    if parsed.migrate and success:
+        if not parsed.postgres_only:  # PostgreSQLをリセットした場合のみ
+            if not run_migrations(verbose):
+                success = False
+
     if verbose:
         print()
         if success:
-            print("✅ リセット完了")
+            print("✅ リセット完了" + ("（マイグレーション実行済み）" if parsed.migrate else ""))
         else:
             print("❌ リセット中にエラーが発生しました")
 
