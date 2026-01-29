@@ -12,21 +12,67 @@ logger = logging.getLogger(__name__)
 
 # 設定（暫定値、ベンチマーク後に調整）
 SEGMENT_WIDTH = 6  # セグメント幅（手番数、パスも1手として数える）
-DFS_START_DEPTH = 48  # DFSを開始する局面深さ（D48 から）
+DFS_START_DEPTH = 48  # DFSを開始可能な最小深さ（D48 から）
+DFS_START_STONE_COUNT = 52  # DFSを開始する最小石数
+MAX_BFS_DEPTH = 60  # BFSの最大深さ（これ以降は石数に関わらず強制DFS）
 
 
-def determine_child_task_spec(child_start_depth: int) -> tuple[str, str, str, int]:
+def _count_stones_from_hex(black_hex: str, white_hex: str) -> int:
+    """
+    16進数文字列から石数を計算
+
+    Args:
+        black_hex: 黒石のビットボード（"0x..."形式）
+        white_hex: 白石のビットボード（"0x..."形式）
+
+    Returns:
+        石数（黒石 + 白石）
+    """
+    black_int = int(black_hex, 16)
+    white_int = int(white_hex, 16)
+    return bin(black_int).count("1") + bin(white_int).count("1")
+
+
+def _should_start_dfs(child_start_depth: int, stone_count: int) -> bool:
+    """
+    DFSを開始すべきか判定
+
+    Args:
+        child_start_depth: 子タスクが開始する深さ
+        stone_count: 石数
+
+    Returns:
+        DFSを開始すべきならTrue
+    """
+    # D60以降は強制DFS（終局間近のため計算量は限定的）
+    if child_start_depth >= MAX_BFS_DEPTH:
+        return True
+    # D48-60の間は石数チェック
+    if child_start_depth >= DFS_START_DEPTH:
+        return stone_count >= DFS_START_STONE_COUNT
+    return False
+
+
+def determine_child_task_spec(
+    child_start_depth: int, stone_count: Optional[int] = None
+) -> tuple[str, str, str, int]:
     """
     子タスク（= 現BFS結果の child_positions から生成するタスク）の仕様を決定
 
     Args:
         child_start_depth: 子タスクが開始する深さ（= 親BFSセグメントの終端深さ）
+        stone_count: 石数（DFS開始判定に使用、Noneの場合は深さのみで判定）
 
     Returns:
         (task_type, phase, queue_name, depth)
     """
-    if child_start_depth >= DFS_START_DEPTH:
-        # DFSは終局まで
+    # 石数が指定されている場合はDFS開始条件をチェック
+    if stone_count is not None:
+        if _should_start_dfs(child_start_depth, stone_count):
+            # DFSは終局まで
+            return ("DFS", f"dfs_from_d{child_start_depth:02d}", "task_queue:dfs:phase3", 100)
+    elif child_start_depth >= MAX_BFS_DEPTH:
+        # 石数未指定でもMAX_BFS_DEPTH以上なら強制DFS
         return ("DFS", f"dfs_from_d{child_start_depth:02d}", "task_queue:dfs:phase3", 100)
 
     end_depth = child_start_depth + SEGMENT_WIDTH
@@ -81,15 +127,45 @@ def _get_accumulated_depth_from_phase(phase: str) -> int:
     return 6
 
 
-def _get_all_bfs_phases() -> list[str]:
+def _get_all_bfs_phases(db: Optional[DatabaseClient] = None) -> list[str]:
     """
-    全BFS層のフェーズ名を取得（D00-06からD42-48まで）
+    全BFS層のフェーズ名を取得
+
+    動的フェーズ対応:
+    - DBが指定された場合: 既存のBFSフェーズ + 次に必要なフェーズを返す
+    - DBが指定されない場合: MAX_BFS_DEPTHまでの全フェーズを返す
+
+    Args:
+        db: DatabaseClient（動的フェーズ取得用、省略可）
 
     Returns:
         フェーズ名のリスト
     """
+    if db is not None:
+        # DBから既存のBFSフェーズを取得し、必要に応じて拡張
+        existing_phases = db.get_existing_bfs_phases()
+        if existing_phases:
+            # 既存フェーズの最大深さを取得
+            max_existing_depth = 0
+            for phase in existing_phases:
+                if phase.startswith("bfs_d"):
+                    parts = phase.replace("bfs_d", "").split("_")
+                    if len(parts) == 2:
+                        end_depth = int(parts[1])
+                        max_existing_depth = max(max_existing_depth, end_depth)
+
+            # 次のフェーズまで含める（D48以降も対応）
+            next_end_depth = min(max_existing_depth + SEGMENT_WIDTH, MAX_BFS_DEPTH)
+            phases = []
+            for start_depth in range(0, next_end_depth, SEGMENT_WIDTH):
+                end_depth = start_depth + SEGMENT_WIDTH
+                phase = f"bfs_d{start_depth:02d}_{end_depth:02d}"
+                phases.append(phase)
+            return phases
+
+    # デフォルト: MAX_BFS_DEPTHまでの全フェーズ（D00-06からD54-60まで）
     phases = []
-    for start_depth in range(0, 48, SEGMENT_WIDTH):
+    for start_depth in range(0, MAX_BFS_DEPTH, SEGMENT_WIDTH):
         end_depth = start_depth + SEGMENT_WIDTH
         phase = f"bfs_d{start_depth:02d}_{end_depth:02d}"
         phases.append(phase)
@@ -131,12 +207,16 @@ def generate_intermediate_tasks(
     """
     完了したBFSタスクの結果から次のタスクを生成
 
-    仕様（Doc/内部仕様書.md:597-608）に基づく:
-    - BFS層（D00-06～D42-48）: 各層に最大2つのタスク（current/next）のみが存在
+    仕様:
+    - BFS層（D00-06～D42-48、および石数条件によりD48以降も）: 
+      各層に最大2つのタスク（current/next）のみが存在
     - 親セグメントのみからcurrentセグメントタスク、nextセグメントタスクを生成する（容量削減のため）
     - currentセグメントが完了したら、nextセグメントをcurrentに昇格させ、新しいnextセグメントを生成する
-    - DFS層（D48-54）: 親セグメント（D42-48層）のnext,current両方の全ノードからDFSタスクを生成する
-    - D48-54層にはcurrent/nextの概念はなく、各ノードから終局まで1タスクで処理する
+    
+    DFS開始条件:
+    - D48以上 かつ 石数52以上: DFSタスク生成（終局まで1タスクで処理）
+    - D48以上 かつ 石数52未満: BFSを継続（bfs_d48_54など、current/nextで管理）
+    - D60以上: 石数に関わらず強制DFS（終局間近のため計算量は限定的）
 
     Args:
         db: DatabaseClient
@@ -148,9 +228,9 @@ def generate_intermediate_tasks(
     """
     total_generated = 0
 
-    # 全BFS層（D06-12からD42-48まで）について子タスクを生成
+    # 全BFS層について子タスクを生成（動的フェーズ対応）
     # D00-06は初期タスクなので親からの生成対象外
-    bfs_phases = _get_all_bfs_phases()
+    bfs_phases = _get_all_bfs_phases(db)
 
     for child_phase in bfs_phases:
         # 親フェーズを取得（D00-06の場合はNone）
@@ -254,72 +334,138 @@ def generate_intermediate_tasks(
             processed_task_ids.add(parent_task_id)
         total_generated += generated_count
 
-    # D42-48層のBFSタスク（current/next両方）からDFSタスクを生成
-    # 仕様: 親セグメント（D42-48層）のnext,current両方の全ノードからDFSタスクを生成する
-    d42_48_phase = "bfs_d42_48"
-    d42_48_headers = db.get_completed_bfs_task_headers_with_children(
-        processed_task_ids=processed_task_ids,
-        phase_filter=d42_48_phase,
-        limit=200,
-    )
+    # D42-48以降のBFS層からDFS/BFSタスクを生成
+    # 石数チェックを行い、石数52以上ならDFS、未満ならBFS継続
+    # D60以降は強制DFS
+    dfs_candidate_phases = [
+        f"bfs_d{start:02d}_{start + SEGMENT_WIDTH:02d}"
+        for start in range(DFS_START_DEPTH - SEGMENT_WIDTH, MAX_BFS_DEPTH, SEGMENT_WIDTH)
+    ]
 
-    for task_id, phase, depth in d42_48_headers:
-        logger.info(
-            f"Processing D42-48 BFS task for DFS generation: task_id={task_id}, phase={phase}, depth={depth}"
+    for dfs_phase in dfs_candidate_phases:
+        dfs_headers = db.get_completed_bfs_task_headers_with_children(
+            processed_task_ids=processed_task_ids,
+            phase_filter=dfs_phase,
+            limit=200,
         )
 
-        # 子タスクの開始深さ（= D42-48の終端=48）
-        child_start_depth = _get_accumulated_depth_from_phase(phase)
-        # 子タスク仕様（DFSタスク）
-        next_task_type, next_phase, queue_name, next_depth = determine_child_task_spec(
-            child_start_depth
-        )
-
-        # 全件をDFSタスク化（current/nextの概念なし）
-        child_positions = db.get_latest_bfs_child_positions(task_id) or []
-
-        if not child_positions:
-            processed_task_ids.add(task_id)
-            continue
-
-        # child_positionsから各DFSタスクを生成
-        generated_count = 0
-        for child in child_positions:
-            position = child["position"]
-            path_count = str(child.get("path_count", "1"))
-
-            position_black, position_white, turn = _parse_position(position)
-
-            # D48-54層のDFSタスクにはsegment_roleは設定しない
-            task = TaskRow(
-                task_type=next_task_type,
-                phase=next_phase,
-                parent_task_id=task_id,
-                position_black=position_black,
-                position_white=position_white,
-                turn=turn,
-                depth=next_depth,
-                path_count=path_count,
-                status="pending",
-                priority=100,
-                retry_count=0,
-                segment_role=None,
+        for task_id, phase, depth in dfs_headers:
+            logger.info(
+                f"Processing {phase} BFS task for DFS/BFS generation: task_id={task_id}, depth={depth}"
             )
 
-            new_task_id = db.create_task(task)
-            valkey.push_task(queue_name, new_task_id)
-            generated_count += 1
+            # 子タスクの開始深さ
+            child_start_depth = _get_accumulated_depth_from_phase(phase)
 
-        logger.info(
-            f"Generated {generated_count} {next_task_type} tasks from D42-48 task_id={task_id} "
-            f"(phase={next_phase}, queue={queue_name})"
-        )
+            # 全件を取得
+            child_positions = db.get_latest_bfs_child_positions(task_id) or []
 
-        # このBFS結果（child_positions）は、子タスク生成が済んだので破棄
-        db.consume_bfs_child_positions(task_id)
+            if not child_positions:
+                processed_task_ids.add(task_id)
+                continue
 
-        # 処理済みとしてマーク
-        processed_task_ids.add(task_id)
-        total_generated += generated_count
+            # child_positionsから各タスクを生成（石数に基づいてDFS/BFSを分岐）
+            generated_dfs_count = 0
+            generated_bfs_count = 0
+            bfs_children_for_current_next: list[dict] = []
+
+            for child in child_positions:
+                position = child["position"]
+                path_count = str(child.get("path_count", "1"))
+
+                # 石数を計算
+                stone_count = _count_stones_from_hex(position["black"], position["white"])
+
+                # DFS開始条件をチェック
+                if _should_start_dfs(child_start_depth, stone_count):
+                    # DFSタスクを生成
+                    position_black, position_white, turn = _parse_position(position)
+                    next_task_type, next_phase, queue_name, next_depth = determine_child_task_spec(
+                        child_start_depth, stone_count
+                    )
+
+                    task = TaskRow(
+                        task_type=next_task_type,
+                        phase=next_phase,
+                        parent_task_id=task_id,
+                        position_black=position_black,
+                        position_white=position_white,
+                        turn=turn,
+                        depth=next_depth,
+                        path_count=path_count,
+                        status="pending",
+                        priority=100,
+                        retry_count=0,
+                        segment_role=None,  # DFSタスクにはsegment_roleなし
+                    )
+
+                    new_task_id = db.create_task(task)
+                    valkey.push_task(queue_name, new_task_id)
+                    generated_dfs_count += 1
+                else:
+                    # BFS継続（後でcurrent/nextとして処理）
+                    bfs_children_for_current_next.append(child)
+
+            # BFS継続が必要な場合、current/nextとして生成
+            if bfs_children_for_current_next:
+                # BFSタスクの仕様を決定（石数なしで呼び出し → BFSとして処理）
+                next_task_type, next_phase, queue_name, next_depth = determine_child_task_spec(
+                    child_start_depth
+                )
+
+                # current/nextの状態を確認
+                existing_current, existing_next = db.get_current_next_tasks_by_phase(next_phase)
+                need_current = existing_current is None
+                need_next = existing_next is None
+                tasks_to_generate = (1 if need_current else 0) + (1 if need_next else 0)
+
+                for idx, child in enumerate(bfs_children_for_current_next[:tasks_to_generate]):
+                    position = child["position"]
+                    path_count = str(child.get("path_count", "1"))
+                    position_black, position_white, turn = _parse_position(position)
+
+                    # segment_roleを決定
+                    if need_current and need_next:
+                        segment_role = "current" if idx == 0 else "next"
+                    elif need_current:
+                        segment_role = "current"
+                    else:
+                        segment_role = "next"
+
+                    task = TaskRow(
+                        task_type=next_task_type,
+                        phase=next_phase,
+                        parent_task_id=task_id,
+                        position_black=position_black,
+                        position_white=position_white,
+                        turn=turn,
+                        depth=next_depth,
+                        path_count=path_count,
+                        status="pending",
+                        priority=100,
+                        retry_count=0,
+                        segment_role=segment_role,
+                    )
+
+                    new_task_id = db.create_task(task)
+                    valkey.push_task(queue_name, new_task_id)
+                    generated_bfs_count += 1
+
+                    logger.info(
+                        f"Generated BFS task {new_task_id} with segment_role={segment_role} "
+                        f"from parent {task_id} (phase={next_phase}, stone_count<{DFS_START_STONE_COUNT})"
+                    )
+
+            if generated_dfs_count > 0:
+                logger.info(
+                    f"Generated {generated_dfs_count} DFS tasks from {phase} task_id={task_id}"
+                )
+
+            # このBFS結果（child_positions）は、子タスク生成が済んだので破棄
+            db.consume_bfs_child_positions(task_id)
+
+            # 処理済みとしてマーク
+            processed_task_ids.add(task_id)
+            total_generated += generated_dfs_count + generated_bfs_count
 
     return total_generated

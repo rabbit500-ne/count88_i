@@ -571,3 +571,24 @@ class DatabaseClient:
                 )
                 rows = cur.fetchall()
         return [int(r[0]) for r in rows]
+
+    def get_existing_bfs_phases(self) -> list[str]:
+        """
+        DBに存在するBFSフェーズ名を取得（動的フェーズ対応用）
+
+        Returns:
+            フェーズ名のリスト（重複なし、ソート済み）
+        """
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT phase
+                    FROM tasks
+                    WHERE task_type = 'BFS'
+                      AND phase LIKE 'bfs_d%'
+                    ORDER BY phase
+                    """
+                )
+                rows = cur.fetchall()
+        return [str(r[0]) for r in rows]

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}count88 - オセロ棋譜数カウントプロジェクト{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h2 style="margin-top: 0;">オセロ棋譜数カウントプロジェクト</h2>
+    <p>
+      オセロ（リバーシ）の全棋譜数を正確にカウントするための分散計算プロジェクトです。
+      ブラウザを開くだけで、あなたも計算に参加できます。
+    </p>
+    <div style="margin-top: 16px;">
+      <a href="/participate" class="btn" style="text-decoration: none; display: inline-block;">
+        計算に参加する
+      </a>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top: 16px;">
+    <div style="display:flex; align-items:center; justify-content: space-between;">
+      <strong>現在の進捗</strong>
+      <span class="muted">10秒ごと更新</span>
+    </div>
+    <div
+      id="progress"
+      hx-get="/progress-fragment"
+      hx-trigger="load, every 10s"
+      hx-swap="innerHTML"
+    ></div>
+  </section>
+
+  <section class="card" style="margin-top: 16px;">
+    <h3 style="margin-top: 0;">プロジェクトについて</h3>
+    <ul>
+      <li>オセロの理論的な棋譜数は約 10<sup>58</sup> と推定されています</li>
+      <li>単一マシンでの計算は現実的でないため、ブラウザベースの分散計算を採用</li>
+      <li>あなたのブラウザが空いている間、計算タスクを処理して貢献できます</li>
+    </ul>
+  </section>
+{% endblock %}

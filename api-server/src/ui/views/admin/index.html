@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}count88 管理画面{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div style="display:flex; gap:10px; align-items:center; justify-content: space-between;">
+      <div>
+        <div><strong>クライアント（管理用）</strong></div>
+        <div class="muted">タスク取得 → 計算（最小）→ 結果送信 を繰り返します</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button id="btn-start" class="btn">開始</button>
+        <button id="btn-stop" class="btn" disabled>停止</button>
+      </div>
+    </div>
+    <div style="margin-top: 10px;" class="muted">
+      Client ID: <code id="client-id">-</code>
+      / Status: <code id="client-status">idle</code>
+      / Last task: <code id="last-task">-</code>
+    </div>
+    <div style="margin-top: 10px;">
+      <pre id="client-log" style="max-height: 200px; overflow:auto;"></pre>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top: 16px;">
+    <section class="card">
+      <div style="display:flex; align-items:center; justify-content: space-between;">
+        <strong>進捗（詳細）</strong>
+        <span class="muted">2秒ごと</span>
+      </div>
+      <div
+        id="progress"
+        hx-get="{{ admin_prefix }}/progress"
+        hx-trigger="load, every 2s"
+        hx-swap="innerHTML"
+      ></div>
+    </section>
+
+    <section class="card">
+      <div style="display:flex; align-items:center; justify-content: space-between;">
+        <strong>統計 / キュー</strong>
+        <span class="muted">5秒ごと</span>
+      </div>
+      <div
+        id="statistics"
+        hx-get="{{ admin_prefix }}/statistics"
+        hx-trigger="load, every 5s"
+        hx-swap="innerHTML"
+      ></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top: 16px;">
+    <div style="display:flex; align-items:center; justify-content: space-between;">
+      <strong>最近のタスク（DB）</strong>
+      <span class="muted">5秒ごと</span>
+    </div>
+    <div
+      id="tasks"
+      hx-get="{{ admin_prefix }}/tasks"
+      hx-trigger="load, every 5s"
+      hx-swap="innerHTML"
+    ></div>
+  </section>
+{% endblock %}

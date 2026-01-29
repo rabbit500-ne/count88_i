@@ -1,0 +1,28 @@
+<div style="margin-top: 10px;">
+  <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+    <div>
+      <div class="muted">全体進捗</div>
+      <div style="font-size: 1.5em; font-weight: bold;">
+        <code>{{ "%.2f"|format(progress_pct) }}%</code>
+      </div>
+    </div>
+    <div>
+      <div class="muted">完了タスク</div>
+      <div style="font-size: 1.5em;">
+        <code>{{ completed }}</code> / <code>{{ total }}</code>
+      </div>
+    </div>
+    {% if sum_games %}
+    <div>
+      <div class="muted">カウント中の棋譜数</div>
+      <div style="font-size: 1.5em;">
+        <code>{{ sum_games }}</code>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  
+  <div style="margin-top: 12px; background: rgba(127,127,127,.2); border-radius: 4px; height: 8px; overflow: hidden;">
+    <div style="background: #4CAF50; height: 100%; width: {{ progress_pct }}%; transition: width 0.3s;"></div>
+  </div>
+</div>

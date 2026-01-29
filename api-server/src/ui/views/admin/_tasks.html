@@ -1,0 +1,28 @@
+<div style="margin-top: 10px; overflow:auto;">
+  <table style="width:100%; border-collapse: collapse;">
+    <thead>
+      <tr>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">task_id</th>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">type</th>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">phase</th>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">status</th>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">depth</th>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">assigned_to</th>
+        <th style="text-align:left; border-bottom: 1px solid rgba(127,127,127,.3); padding: 6px;">created_at</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tasks %}
+        <tr>
+          <td style="padding: 6px;"><code>{{ t.task_id }}</code></td>
+          <td style="padding: 6px;"><code>{{ t.task_type }}</code></td>
+          <td style="padding: 6px;"><code>{{ t.phase }}</code></td>
+          <td style="padding: 6px;"><code>{{ t.status }}</code></td>
+          <td style="padding: 6px;"><code>{{ t.depth }}</code></td>
+          <td style="padding: 6px;"><code>{{ t.assigned_to or "-" }}</code></td>
+          <td style="padding: 6px;"><code>{{ t.created_at }}</code></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

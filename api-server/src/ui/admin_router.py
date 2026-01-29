@@ -1,4 +1,4 @@
-"""UI ルーター（htmx + Jinja2）"""
+"""管理画面ルーター（htmx + Jinja2）"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from redis.exceptions import ConnectionError, TimeoutError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from src.config import settings
 from src.infra.database.session import get_db
 from src.infra.models.result import Result
 from src.infra.models.task import Task
@@ -21,8 +22,9 @@ from src.infra.queue.client import ValkeyClient
 
 router = APIRouter()
 
-_views_dir = Path(__file__).resolve().parent / "views"
-templates = Jinja2Templates(directory=str(_views_dir))
+_views_dir = Path(__file__).resolve().parent / "views" / "admin"
+_base_views_dir = Path(__file__).resolve().parent / "views"
+templates = Jinja2Templates(directory=str(_base_views_dir))
 
 
 @dataclass(frozen=True)
@@ -50,13 +52,19 @@ def _get_queue_status(
     return out
 
 
+def _get_admin_prefix() -> str:
+    """管理画面のURLプレフィックスを取得"""
+    return f"/{settings.admin_path}"
+
+
 @router.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
-    """トップページ（フルページ）"""
+    """管理画面トップページ"""
     return templates.TemplateResponse(
-        "index.html",
+        "admin/index.html",
         {
             "request": request,
+            "admin_prefix": _get_admin_prefix(),
         },
     )
 
@@ -66,7 +74,7 @@ def progress_fragment(
     request: Request,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """進捗フラグメント"""
+    """進捗フラグメント（詳細版）"""
     def _count_tasks(*, task_type: Optional[str], statuses: Optional[tuple[str, ...]] = None) -> int:
         q = db.query(func.count(Task.task_id))
         if task_type is not None:
@@ -100,7 +108,7 @@ def progress_fragment(
     dfs = _make_row(label="DFS", task_type="DFS")
 
     return templates.TemplateResponse(
-        "_progress.html",
+        "admin/_progress.html",
         {
             "request": request,
             # backward compatible (既存UIのキーを維持)
@@ -130,7 +138,7 @@ def statistics_fragment(
     queues = _get_queue_status(valkey=valkey)
 
     return templates.TemplateResponse(
-        "_statistics.html",
+        "admin/_statistics.html",
         {
             "request": request,
             "results_total": results_total,
@@ -164,10 +172,9 @@ def tasks_fragment(
         )
 
     return templates.TemplateResponse(
-        "_tasks.html",
+        "admin/_tasks.html",
         {
             "request": request,
             "tasks": rows,
         },
     )
-

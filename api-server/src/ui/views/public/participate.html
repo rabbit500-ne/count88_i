@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}count88 - 計算に参加{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div style="display:flex; gap:10px; align-items:center; justify-content: space-between;">
+      <div>
+        <div><strong>分散計算クライアント</strong></div>
+        <div class="muted">開始ボタンを押すと、タスクを取得して計算を開始します</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button id="btn-start" class="btn">開始</button>
+        <button id="btn-stop" class="btn" disabled>停止</button>
+      </div>
+    </div>
+    <div style="margin-top: 10px;" class="muted">
+      Client ID: <code id="client-id">-</code>
+      / Status: <code id="client-status">idle</code>
+      / Last task: <code id="last-task">-</code>
+    </div>
+    <div style="margin-top: 10px;">
+      <pre id="client-log" style="max-height: 200px; overflow:auto;"></pre>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top: 16px;">
+    <div style="display:flex; align-items:center; justify-content: space-between;">
+      <strong>現在の進捗</strong>
+      <span class="muted">10秒ごと更新</span>
+    </div>
+    <div
+      id="progress"
+      hx-get="/progress-fragment"
+      hx-trigger="load, every 10s"
+      hx-swap="innerHTML"
+    ></div>
+  </section>
+
+  <section class="card" style="margin-top: 16px;">
+    <h3 style="margin-top: 0;">参加の仕組み</h3>
+    <ol>
+      <li>「開始」ボタンを押すと、サーバーから計算タスクを取得します</li>
+      <li>ブラウザ内でオセロの棋譜数を計算します</li>
+      <li>計算結果をサーバーに送信します</li>
+      <li>次のタスクを自動的に取得し、繰り返します</li>
+    </ol>
+    <p class="muted">
+      ブラウザを閉じたり「停止」ボタンを押すと、いつでも参加を中断できます。
+    </p>
+  </section>
+{% endblock %}

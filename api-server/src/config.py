@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # セキュリティ設定
     secret_key: Optional[str] = None
 
+    # 管理画面パス設定
+    # 本番環境では推測されにくいランダムな文字列に変更すること
+    admin_path: str = "ctrl-panel"
+
     def get_database_url(self) -> str:
         """データベース接続URLを取得"""
         return self.database_url
