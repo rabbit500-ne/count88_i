@@ -85,3 +85,24 @@ class ValkeyClient:
             logger.error(f"Valkey llen 失敗: {e}")
             raise
 
+    def get(self, key: str) -> Optional[str]:
+        """キーの値を取得"""
+        self._ensure_connected()
+        try:
+            result = self._client.get(key)
+            if result is None:
+                return None
+            return result.decode("utf-8") if isinstance(result, bytes) else str(result)
+        except (ConnectionError, TimeoutError) as e:
+            logger.error(f"Valkey get 失敗: {e}")
+            return None
+
+    def set(self, key: str, value: str, ex: Optional[int] = None) -> bool:
+        """キーに値を設定"""
+        self._ensure_connected()
+        try:
+            return bool(self._client.set(key, value, ex=ex))
+        except (ConnectionError, TimeoutError) as e:
+            logger.error(f"Valkey set 失敗: {e}")
+            return False
+

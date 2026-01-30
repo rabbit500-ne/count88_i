@@ -10,6 +10,7 @@ from src.infra.database.session import Base, engine
 from src.api.router import router as api_router
 from src.ui.admin_router import router as admin_router
 from src.ui.public_router import router as public_router
+from src.services.throughput_calculator import throughput_calculator
 
 
 def create_app() -> FastAPI:
@@ -21,6 +22,12 @@ def create_app() -> FastAPI:
         # 開発用: マイグレーション未整備のため、最低限テーブルを作成
         # 本番/運用では Alembic に移行する想定
         Base.metadata.create_all(bind=engine)
+        # スループット計算バックグラウンドタスク開始
+        throughput_calculator.start()
+
+    @app.on_event("shutdown")
+    def _shutdown() -> None:
+        throughput_calculator.stop()
 
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
